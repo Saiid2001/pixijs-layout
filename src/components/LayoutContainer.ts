@@ -261,8 +261,15 @@ export class LayoutContainer extends Container {
             return;
         }
         this._trackpad.update();
-        this.overflowContainer.x = this._trackpad.x;
-        this.overflowContainer.y = this._trackpad.y;
+
+        // The trackpad reports null until its bounds have been measured, and
+        // writing that into a position makes the transform NaN. NaN spreads to
+        // every descendant's world transform, so a container that had not been
+        // scrolled yet erased its own contents the moment a frame ticked.
+        const { x, y } = this._trackpad;
+
+        this.overflowContainer.x = Number.isFinite(x) ? x : 0;
+        this.overflowContainer.y = Number.isFinite(y) ? y : 0;
     }
 
     public override destroy(options?: DestroyOptions): void {
