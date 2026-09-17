@@ -62,10 +62,6 @@ export interface OverflowContainer extends Container {
  * ```
  */
 export class LayoutContainer extends Container {
-    /** Graphics object used for rendering background and borders */
-    public background: Container | Graphics;
-    public stroke: Graphics = new Graphics({ label: 'stroke' });
-
     /** The container that holds the overflow content */
     public overflowContainer: OverflowContainer = new Container({
         label: 'overflowContainer',
@@ -74,11 +70,59 @@ export class LayoutContainer extends Container {
     /** The trackpad for handling scrolling */
     protected _trackpad: Trackpad;
 
-    /** Mask for overflow handling */
-    private _mask: Graphics = new Graphics();
+    // The background, the border stroke and the overflow mask are each created
+    // the first time something asks to draw one. Most containers never paint
+    // any of them, and allocating all three up front put three objects that
+    // draw nothing into the scene for every box on the page — on a long article
+    // that was 115,000 of the 220,000 objects in the tree, two thirds of them
+    // empty, and everything that walks the scene paid for them on every frame.
+    private _background: Container | Graphics | null = null;
+    private _stroke: Graphics | null = null;
+    private _mask: Graphics | null = null;
 
     /** Whether or not the background was created by the user */
     private _isUserBackground: boolean = false;
+
+    /** The background, created on first use. */
+    public get background(): Container | Graphics {
+        if (!this._background) {
+            this._background = new Graphics({ label: 'background' });
+            // Behind the content, which is the first child otherwise.
+            super.addChildAt(this._background, 0);
+        }
+
+        return this._background;
+    }
+
+    public set background(value: Container | Graphics) {
+        if (this._background) {
+            super.removeChild(this._background);
+        }
+
+        this._background = value;
+        super.addChildAt(value, 0);
+    }
+
+    /** The border stroke, created on first use. */
+    public get stroke(): Graphics {
+        if (!this._stroke) {
+            this._stroke = new Graphics({ label: 'stroke' });
+            // In front of everything else.
+            super.addChild(this._stroke);
+        }
+
+        return this._stroke;
+    }
+
+    /** The overflow mask, created on first use. */
+    private get _overflowMask(): Graphics {
+        if (!this._mask) {
+            this._mask = new Graphics();
+            super.addChild(this._mask);
+        }
+
+        return this._mask;
+    }
 
     constructor(params: LayoutContainerOptions = {}) {
         const { layout, trackpad, background, ...options } = params;
@@ -87,10 +131,14 @@ export class LayoutContainer extends Container {
         this.layout = layout ?? {};
 
         this.overflowContainer.isOverflowContainer = true;
-        this.background = background ?? new Graphics({ label: 'background' });
-        this._isUserBackground = !!background;
 
-        this.addChild(this.background, this.overflowContainer, this._mask, this.stroke);
+        super.addChild(this.overflowContainer);
+
+        if (background) {
+            this._isUserBackground = true;
+            this.background = background;
+        }
+
         this.addChild = this._addChild;
         this.removeChild = this._removeChild;
 
@@ -163,7 +211,9 @@ export class LayoutContainer extends Container {
      * @param radius - Border radius
      */
     protected _updateMask(width: number, height: number, radius: number = 0) {
-        this._mask.clear();
+        const mask = this._overflowMask;
+
+        mask.clear();
 
         // A collapsed box clips everything away, and an empty mask says exactly
         // that. Carrying on would pass a negative size to roundRect below and
@@ -172,16 +222,16 @@ export class LayoutContainer extends Container {
             return;
         }
 
-        this._mask.roundRect(0, 0, width, height, radius);
-        this._mask.fill(0x0000ff);
+        mask.roundRect(0, 0, width, height, radius);
+        mask.fill(0x0000ff);
 
         // The inset rect only exists on a box big enough to have one.
         if (width > 2 && height > 2) {
-            this._mask.roundRect(1, 1, width - 2, height - 2, radius);
-            this._mask.cut();
-            this._mask.roundRect(1, 1, width - 2, height - 2, radius);
-            this._mask.fill(0x00ff00);
-            this._mask.cut();
+            mask.roundRect(1, 1, width - 2, height - 2, radius);
+            mask.cut();
+            mask.roundRect(1, 1, width - 2, height - 2, radius);
+            mask.fill(0x00ff00);
+            mask.cut();
         }
     }
 
@@ -193,6 +243,12 @@ export class LayoutContainer extends Container {
             this.background.position.set(0, 0);
             this.background.setSize(computedLayout.width, computedLayout.height);
         } else {
+            // Nothing to paint and nothing painted before: leave it uncreated.
+            // eslint-disable-next-line no-eq-null, eqeqeq
+            if (backgroundColor == null && !this._background) {
+                return;
+            }
+
             const background = this.background as Graphics;
 
             background.clear();
@@ -222,12 +278,17 @@ export class LayoutContainer extends Container {
         const { borderColor, borderRadius } = layoutStyles;
 
         this._updateBackground(computedLayout);
-        this.stroke.clear();
 
         // eslint-disable-next-line no-eq-null, eqeqeq
-        if (borderWidth > 0 && borderColor != null) {
-            this.stroke.roundRect(0, 0, computedLayout.width, computedLayout.height, borderRadius ?? 0);
-            this.stroke.stroke({ color: borderColor, width: borderWidth, alignment });
+        const hasBorder = borderWidth > 0 && borderColor != null;
+
+        if (hasBorder || this._stroke) {
+            this.stroke.clear();
+
+            if (hasBorder) {
+                this.stroke.roundRect(0, 0, computedLayout.width, computedLayout.height, borderRadius ?? 0);
+                this.stroke.stroke({ color: borderColor, width: borderWidth, alignment });
+            }
         }
 
         // Handle overflow
@@ -235,7 +296,7 @@ export class LayoutContainer extends Container {
 
         if (overflow !== 'visible') {
             this._updateMask(computedLayout.width, computedLayout.height, layoutStyles.borderRadius ?? 0);
-            this.setMask({ mask: this._mask });
+            this.setMask({ mask: this._overflowMask });
             // the max value is actually the difference between the container size and the content size and the stroke
             const borderOffset = boxSizing === BoxSizing.BorderBox ? borderWidth : 0;
 
