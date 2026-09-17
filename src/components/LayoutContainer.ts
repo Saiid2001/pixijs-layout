@@ -164,13 +164,25 @@ export class LayoutContainer extends Container {
      */
     protected _updateMask(width: number, height: number, radius: number = 0) {
         this._mask.clear();
+
+        // A collapsed box clips everything away, and an empty mask says exactly
+        // that. Carrying on would pass a negative size to roundRect below and
+        // hand the tessellator degenerate geometry, which throws.
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+
         this._mask.roundRect(0, 0, width, height, radius);
         this._mask.fill(0x0000ff);
-        this._mask.roundRect(1, 1, width - 2, height - 2, radius);
-        this._mask.cut();
-        this._mask.roundRect(1, 1, width - 2, height - 2, radius);
-        this._mask.fill(0x00ff00);
-        this._mask.cut();
+
+        // The inset rect only exists on a box big enough to have one.
+        if (width > 2 && height > 2) {
+            this._mask.roundRect(1, 1, width - 2, height - 2, radius);
+            this._mask.cut();
+            this._mask.roundRect(1, 1, width - 2, height - 2, radius);
+            this._mask.fill(0x00ff00);
+            this._mask.cut();
+        }
     }
 
     protected _updateBackground(computedLayout: ComputedLayout) {
