@@ -76,9 +76,19 @@ export class LayoutView<T extends Container = Container> extends LayoutContainer
         super.layout = rest;
 
         if (this.layout && this.slot) {
+            // A percentage needs something definite on this side to resolve
+            // against. Where the view's own size is auto — which is the common
+            // case for a control sitting in a line of text — yoga reads the
+            // percentage as zero, the slot collapses, and whatever the slot
+            // holds is never laid out at all: its computed size comes back NaN
+            // and it paints nothing. CSS 2.1 10.5 gives the same answer, that a
+            // percentage against an indefinite containing block is auto.
+            const definite = (size: unknown) =>
+                typeof size === 'number' || (typeof size === 'string' && size.trim().endsWith('%'));
+
             this.slot.layout = {
-                width: '100%',
-                height: '100%',
+                width: definite(rest.width) ? '100%' : 'auto',
+                height: definite(rest.height) ? '100%' : 'auto',
                 objectFit,
                 objectPosition,
                 applySizeDirectly,
