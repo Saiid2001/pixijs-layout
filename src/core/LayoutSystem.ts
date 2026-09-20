@@ -123,7 +123,14 @@ export class LayoutSystem implements System<LayoutSystemOptions> {
         if (layout) {
             const layoutStyles = layout.style;
 
-            if (layoutStyles.width === 'intrinsic' || layoutStyles.height === 'intrinsic') {
+            const wantsMeasuring = layoutStyles.width === 'intrinsic' || layoutStyles.height === 'intrinsic';
+
+            // A node holding layout children is sized by yoga from those
+            // children, and their geometry is what this measurement would
+            // read: the size written back is the one it came from. Where the
+            // content is laid out at all wrong, each pass compounds the error
+            // instead of it staying the local mistake it is.
+            if (wantsMeasuring && layout.yoga.getChildCount() === 0) {
                 const size = getPixiSize(layout);
 
                 if (layoutStyles.width === 'intrinsic') {
