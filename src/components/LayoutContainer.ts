@@ -67,8 +67,53 @@ export class LayoutContainer extends Container {
         label: 'overflowContainer',
     }) as OverflowContainer;
 
-    /** The trackpad for handling scrolling */
-    protected _trackpad: Trackpad;
+    /** The trackpad for handling scrolling, made when one is first needed */
+    protected _trackpadInstance: Trackpad | null = null;
+    protected _trackpadOptions: TrackpadOptions | undefined;
+
+    /**
+     * The trackpad that scrolls this container, and the pointer listeners it
+     * reads. Built on first use: a container that scrolls is a small minority
+     * of them, and giving every one a trackpad and six listeners was the
+     * single largest cost of building a large page — a fifth of the time
+     * iana.org/protocols took to load, which is 35,657 elements.
+     */
+    protected get _trackpad(): Trackpad {
+        if (this._trackpadInstance) {
+            return this._trackpadInstance;
+        }
+
+        const trackpad = new Trackpad({
+            constrain: true,
+            ...this._trackpadOptions,
+        });
+
+        this._trackpadInstance = trackpad;
+
+        this.on('pointerdown', (e) => trackpad.pointerDown(e.global));
+        this.on('pointerup', () => trackpad.pointerUp());
+        this.on('pointerupoutside', () => trackpad.pointerUp());
+        this.on('pointermove', (e) => trackpad.pointerMove(e.global));
+        this.on('pointercancel', () => trackpad.pointerUp());
+        this.on('wheel', (e) => {
+            const overflow = this.layout?.style.overflow;
+
+            if (overflow !== 'scroll') {
+                return;
+            }
+            const shift = e.shiftKey ? 1 : 0;
+            const deltaX = e.deltaX * (shift ? 1 : -1);
+            const deltaY = e.deltaY * (shift ? -1 : 1);
+
+            const targetX = trackpad.xAxis.value - deltaX;
+            const targetY = trackpad.yAxis.value - deltaY;
+
+            trackpad.xAxis.value = Math.max(trackpad.xAxis.max, Math.min(trackpad.xAxis.min, targetX));
+            trackpad.yAxis.value = Math.max(trackpad.yAxis.max, Math.min(trackpad.yAxis.min, targetY));
+        });
+
+        return trackpad;
+    }
 
     // The background, the border stroke and the overflow mask are each created
     // the first time something asks to draw one. Most containers never paint
@@ -142,38 +187,8 @@ export class LayoutContainer extends Container {
         this.addChild = this._addChild;
         this.removeChild = this._removeChild;
 
-        this._trackpad = new Trackpad({
-            constrain: true,
-            ...trackpad,
-        });
+        this._trackpadOptions = trackpad;
         this.eventMode = 'static';
-        this.on('pointerdown', (e) => this._trackpad.pointerDown(e.global));
-        this.on('pointerup', () => this._trackpad.pointerUp());
-        this.on('pointerupoutside', () => this._trackpad.pointerUp());
-        this.on('pointermove', (e) => this._trackpad.pointerMove(e.global));
-        this.on('pointercancel', () => this._trackpad.pointerUp());
-        this.on('wheel', (e) => {
-            const overflow = this.layout?.style.overflow;
-
-            if (overflow !== 'scroll') {
-                return;
-            }
-            const shift = e.shiftKey ? 1 : 0;
-            const deltaX = e.deltaX * (shift ? 1 : -1);
-            const deltaY = e.deltaY * (shift ? -1 : 1);
-
-            const targetX = this._trackpad.xAxis.value - deltaX;
-            const targetY = this._trackpad.yAxis.value - deltaY;
-
-            this._trackpad.xAxis.value = Math.max(
-                this._trackpad.xAxis.max,
-                Math.min(this._trackpad.xAxis.min, targetX),
-            );
-            this._trackpad.yAxis.value = Math.max(
-                this._trackpad.yAxis.max,
-                Math.min(this._trackpad.yAxis.min, targetY),
-            );
-        });
         Ticker.shared.add(this.update, this);
     }
 
@@ -309,8 +324,15 @@ export class LayoutContainer extends Container {
             }, 1);
         } else {
             this.mask = null;
-            this._trackpad.xAxis.value = 0;
-            this._trackpad.yAxis.value = 0;
+
+            // Read rather than asked for: a container that does not clip has
+            // nothing to scroll, and asking would build the trackpad that not
+            // building is the point of.
+            if (this._trackpadInstance) {
+                this._trackpadInstance.xAxis.value = 0;
+                this._trackpadInstance.yAxis.value = 0;
+            }
+
             this.overflowContainer.position.set(0, 0);
         }
     }
