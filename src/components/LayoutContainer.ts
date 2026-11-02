@@ -285,9 +285,23 @@ export class LayoutContainer extends Container {
      * @protected
      */
     protected _drawBackground(computedLayout: ComputedLayout) {
-        const borderWidth = this.layout!.yoga.getBorder(Edge.All);
-        const boxSizing = this.layout!.yoga.getBoxSizing();
-        const alignment = boxSizing === BoxSizing.BorderBox ? 1 : 0;
+        const yoga = this.layout!.yoga;
+
+        // Inside the box, always: Yoga's computed layout is the border box under
+        // either box sizing -- content-box adds the border to the size asked for
+        // rather than leaving it outside -- so a stroke aligned outwards drew the
+        // border beyond the box it belongs to and grew the element by its width.
+        const alignment = 1;
+
+        // Yoga answers getBorder(Edge.All) only where the border was set on that
+        // edge, and returns null for one given per side. A layout built from CSS
+        // has the per-side form -- a stylesheet's border resolves to its four
+        // sides -- so the computed edges are the only ones that answer, and
+        // asking Edge.All alone drew no border at all for such a box.
+        const top = yoga.getComputedBorder(Edge.Top) || 0;
+        const right = yoga.getComputedBorder(Edge.Right) || 0;
+        const bottom = yoga.getComputedBorder(Edge.Bottom) || 0;
+        const left = yoga.getComputedBorder(Edge.Left) || 0;
 
         const layoutStyles = this.layout!.style;
         const { borderColor, borderRadius } = layoutStyles;
@@ -295,14 +309,28 @@ export class LayoutContainer extends Container {
         this._updateBackground(computedLayout);
 
         // eslint-disable-next-line no-eq-null, eqeqeq
-        const hasBorder = borderWidth > 0 && borderColor != null;
+        const hasBorder = (top > 0 || right > 0 || bottom > 0 || left > 0) && borderColor != null;
+        const uniform = top === right && right === bottom && bottom === left;
 
         if (hasBorder || this._stroke) {
             this.stroke.clear();
 
-            if (hasBorder) {
+            if (hasBorder && uniform) {
                 this.stroke.roundRect(0, 0, computedLayout.width, computedLayout.height, borderRadius ?? 0);
-                this.stroke.stroke({ color: borderColor, width: borderWidth, alignment });
+                this.stroke.stroke({ color: borderColor, width: top, alignment });
+            } else if (hasBorder) {
+                // Sides of unequal width are not one stroke: each is the band it
+                // covers along its own edge, drawn inside the box. A radius does
+                // not apply to these, and neither does a per-side colour -- the
+                // style carries one colour for the whole border.
+                const { width, height } = computedLayout;
+
+                if (top > 0) this.stroke.rect(0, 0, width, top);
+                if (bottom > 0) this.stroke.rect(0, height - bottom, width, bottom);
+                if (left > 0) this.stroke.rect(0, top, left, Math.max(0, height - top - bottom));
+                if (right > 0) this.stroke.rect(width - right, top, right, Math.max(0, height - top - bottom));
+
+                this.stroke.fill({ color: borderColor });
             }
         }
 
@@ -313,7 +341,7 @@ export class LayoutContainer extends Container {
             this._updateMask(computedLayout.width, computedLayout.height, layoutStyles.borderRadius ?? 0);
             this.setMask({ mask: this._overflowMask });
             // the max value is actually the difference between the container size and the content size and the stroke
-            const borderOffset = boxSizing === BoxSizing.BorderBox ? borderWidth : 0;
+            const borderOffset = yoga.getBoxSizing() === BoxSizing.BorderBox ? top : 0;
 
             setTimeout(() => {
                 const maskWidth = computedLayout.width - this.overflowContainer.width - borderOffset * 2;
