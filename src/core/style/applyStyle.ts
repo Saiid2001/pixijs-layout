@@ -226,18 +226,25 @@ export function applyStyle(node: YogaNode, style: YogaStyles = {}): void {
         }
     }
 
-    // if both left and right are set, width is set to auto
-    // otherwise set the current width either from style or discovered size
+    // Opposite insets size a box only where it is absolutely positioned (CSS 2.1
+    // 10.3.7, 10.6.4). A relatively positioned box is laid out at its own size
+    // and then shifted, its right and bottom ignored when left and top are set
+    // (9.4.3), so its width and height are kept. The full-bleed pattern,
+    // `position: relative; left: 50%; right: 50%; margin: 0 -50vw; width: 100vw`,
+    // otherwise lost its width and was stretched across its parent and both
+    // negative margins.
+    const sizedByInsets = style.position === 'absolute';
+
     if (style.width !== undefined) {
-        const widthValue = style.left !== undefined && style.right !== undefined ? 'auto' : style.width;
+        const widthValue =
+            sizedByInsets && style.left !== undefined && style.right !== undefined ? 'auto' : style.width;
 
         node.setWidth(widthValue as number);
     }
 
-    // if both top and bottom are set, height is set to auto
-    // otherwise set the current height either from style or discovered size
     if (style.height !== undefined) {
-        const heightValue = style.top !== undefined && style.bottom !== undefined ? 'auto' : style.height;
+        const heightValue =
+            sizedByInsets && style.top !== undefined && style.bottom !== undefined ? 'auto' : style.height;
 
         node.setHeight(heightValue as number);
     }
