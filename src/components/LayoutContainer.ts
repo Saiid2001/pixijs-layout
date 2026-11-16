@@ -276,6 +276,25 @@ export class LayoutContainer extends Container {
     }
 
     /**
+     * How far the content can be scrolled: the difference between the container's size
+     * and its content's, less the border on either side.
+     */
+    protected _updateScrollBounds(computedLayout: ComputedLayout, borderOffset: number) {
+        // Measured a millisecond after the layout, by which time a re-render may have
+        // destroyed the container: its transform is gone, and reading its content's
+        // width threw out of the timer.
+        if (this.destroyed || this.overflowContainer.destroyed) {
+            return;
+        }
+
+        const maskWidth = computedLayout.width - this.overflowContainer.width - borderOffset * 2;
+        const maskHeight = computedLayout.height - this.overflowContainer.height - borderOffset * 2;
+
+        this._trackpad.xAxis.max = Math.min(0, maskWidth);
+        this._trackpad.yAxis.max = Math.min(0, maskHeight);
+    }
+
+    /**
      * Draws the container's background including:
      * - Background color
      * - Border
@@ -343,13 +362,7 @@ export class LayoutContainer extends Container {
             // the max value is actually the difference between the container size and the content size and the stroke
             const borderOffset = yoga.getBoxSizing() === BoxSizing.BorderBox ? top : 0;
 
-            setTimeout(() => {
-                const maskWidth = computedLayout.width - this.overflowContainer.width - borderOffset * 2;
-                const maskHeight = computedLayout.height - this.overflowContainer.height - borderOffset * 2;
-
-                this._trackpad.xAxis.max = Math.min(0, maskWidth);
-                this._trackpad.yAxis.max = Math.min(0, maskHeight);
-            }, 1);
+            setTimeout(() => this._updateScrollBounds(computedLayout, borderOffset), 1);
         } else {
             this.mask = null;
 
